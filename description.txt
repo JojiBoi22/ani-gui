@@ -1,0 +1,1 @@
+ani-gui: A modern, Netflix-inspired web GUI for anime streaming. Features seamless search, browser playback with multiple sources, and catalog browsing for Series & Movies using AllAnime/AniList APIs. Includes watchlist, history, genre filtering, and Docker support for a robust, user-friendly experience.
