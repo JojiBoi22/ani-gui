@@ -81,3 +81,4 @@ To contribute, please follow these steps:
 
 ## License
 This project is under the [MIT License](). (Replace with actual license if applicable).
+# ani-gui
