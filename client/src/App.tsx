@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { Search, Play, X, Plus, Check, Loader2, Filter, Tv, Film } from 'lucide-react'; // Added Tv and Film icons
+import { Search, Play, X, Plus, Check, Loader2, Filter, Tv, Film } from 'lucide-react';
 import './App.css';
 import Plyr from 'plyr';
 import 'plyr/dist/plyr.css';
@@ -61,13 +61,12 @@ function App() {
     try {
       let url = "";
       if (activeTab === 'Home' && !query) {
-          // Fetch popular for Home "Trending Today" section
-          url = `${API_BASE}/popular?format=TV`; // Default to TV series for general trending
-      } else if (query) { // If there's a search query
+          url = `${API_BASE}/popular?format=TV`; // Default to TV for Home trending
+      } else if (query) {
           url = `${API_BASE}/search?query=${query}`;
           if (activeTab === 'Series') url += `&subType=tv`;
           if (activeTab === 'Movies') url += `&subType=movie`;
-      } else { // If not Home and no query (i.e., Series/Movies tab with no search)
+      } else { // Series or Movies tab with no query
           url = `${API_BASE}/popular?format=${activeTab === 'Movies' ? 'MOVIE' : 'TV'}`;
       }
       
@@ -83,8 +82,8 @@ function App() {
   };
 
   useEffect(() => {
-    // Fetch content when tab changes or query/genre filters are applied
-    fetchContent();
+    const debounce = setTimeout(fetchContent, activeTab === 'Home' && !query ? 0 : 500);
+    return () => clearTimeout(debounce);
   }, [activeTab, query, filterGenre]);
 
   const openAnime = async (anime: Anime) => {

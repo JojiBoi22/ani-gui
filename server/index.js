@@ -44,7 +44,9 @@ app.get('/api/search', async (req, res) => {
         search: { 
             allowAdult: false, 
             allowUnknown: false, 
-            query: query || ""
+            query: query || "",
+            subType: subType || null, // Add subType here
+            genres: genres ? (Array.isArray(genres) ? genres : [genres]) : null // Add genres
         },
         limit: 40,
         page: 1,
