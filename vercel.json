@@ -10,18 +10,12 @@
     {
       "src": "server/package.json",
       "use": "@vercel/server"
-    }
+      }
   ],
   "routes": [
     {
       "src": "/api/:path*",
       "dest": "/server/index.js"
     }
-  ],
-  "functions": {
-    "server/index.js": {
-      "memory": 128,
-      "maxDuration": 10
-    }
-  }
+  ]
 }
