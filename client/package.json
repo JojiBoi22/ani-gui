@@ -10,7 +10,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@types/dompurify": "^3.0.5",
     "axios": "^1.14.0",
+    "dompurify": "^3.3.3",
     "hls.js": "^1.6.15",
     "lucide-react": "^1.7.0",
     "plyr": "^3.8.4",
