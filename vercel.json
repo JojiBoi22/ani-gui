@@ -8,9 +8,9 @@
       }
     },
     {
-      "src": "server/package.json",
-      "use": "@vercel/server"
-      }
+      "src": "server/index.js",
+      "use": "@vercel/node"
+    }
   ],
   "routes": [
     {
