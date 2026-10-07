@@ -7,7 +7,6 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Basic Security
 app.use(helmet({
   contentSecurityPolicy: false,
   crossOriginEmbedderPolicy: false
@@ -20,10 +19,9 @@ const ALLANIME_BASE = "allanime.day";
 const ALLANIME_API = `https://api.${ALLANIME_BASE}/api`;
 const AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0";
 
-// Decoding logic ported from ani-cli
 function decodeSourceUrl(sourceUrl) {
-    if (!sourceUrl.startsWith('--')) return sourceUrl;
-    
+    if (!sourceUrl || !sourceUrl.startsWith('--')) return sourceUrl;
+
     const hex = sourceUrl.slice(2);
     let decoded = "";
     const map = {
@@ -40,18 +38,75 @@ function decodeSourceUrl(sourceUrl) {
     return decoded.replace("/clock", "/clock.json");
 }
 
+function normalizeTitle(value) {
+    return String(value || "")
+        .toLowerCase()
+        .replace(/&/g, " and ")
+        .replace(/[^a-z0-9]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+function titleScore(query, candidate) {
+    const q = normalizeTitle(query);
+    const n = normalizeTitle(candidate);
+    if (!q || !n) return 0;
+    if (q === n) return 100;
+    if (n.startsWith(q) || q.startsWith(n)) return 86;
+    if (n.includes(q) || q.includes(n)) return 72;
+    const qTokens = q.split(" ").filter((word) => word.length > 1);
+    const nTokens = new Set(n.split(" ").filter((word) => word.length > 1));
+    if (!qTokens.length) return 0;
+    const hits = qTokens.filter((token) => nTokens.has(token)).length;
+    return Math.round((hits / qTokens.length) * 64);
+}
+
+async function searchShows(name) {
+    const searchGql = `query($search: SearchInput, $limit: Int, $translationType: VaildTranslationTypeEnumType, $countryOrigin: VaildCountryOriginEnumType) { shows(search: $search, limit: $limit, translationType: $translationType, countryOrigin: $countryOrigin) { edges { _id name thumbnail availableEpisodes genres status } } }`;
+    const response = await axios.post(ALLANIME_API, {
+        variables: {
+            search: { query: name, allowAdult: false, allowUnknown: false },
+            limit: 8,
+            translationType: "sub",
+            countryOrigin: "ALL"
+        },
+        query: searchGql
+    }, {
+        headers: {
+            'Referer': ALLANIME_REFR,
+            'User-Agent': AGENT,
+            'Content-Type': 'application/json'
+        }
+    });
+    return response.data.data?.shows?.edges || [];
+}
+
+function pickBestShow(candidates, queries) {
+    let best = null;
+    let bestRank = -1;
+    for (const edge of candidates) {
+        const score = Math.max(...queries.map((query) => titleScore(query, edge.name)));
+        if (score < 55) continue;
+        const episodes = Number(edge.availableEpisodes?.sub || 0);
+        const rank = score * 1000 + Math.min(episodes, 400);
+        if (rank > bestRank) {
+            bestRank = rank;
+            best = edge;
+        }
+    }
+    return best;
+}
+
 app.get('/api/search', async (req, res) => {
     const { query, subType, genres } = req.query;
-    console.log(`[DEBUG] Search request: query="${query}", subType="${subType}", genres="${genres}"`);
-    
     const searchGql = `query($search: SearchInput, $limit: Int, $page: Int, $translationType: VaildTranslationTypeEnumType, $countryOrigin: VaildCountryOriginEnumType) { shows(search: $search, limit: $limit, page: $page, translationType: $translationType, countryOrigin: $countryOrigin) { edges { _id name thumbnail availableEpisodes genres status aniListId } } }`;
-    
+
     const variables = {
-        search: { 
-            allowAdult: false, 
-            allowUnknown: false, 
+        search: {
+            allowAdult: false,
+            allowUnknown: false,
             query: query || "",
-            subType: subType ? subType.toUpperCase() : null
+            subType: subType ? String(subType).toUpperCase() : null
         },
         limit: 40,
         page: 1,
@@ -62,31 +117,25 @@ app.get('/api/search', async (req, res) => {
     if (genres) {
         variables.search.genres = Array.isArray(genres) ? genres : [genres];
     }
-    
-    console.log(`[DEBUG] Sending GraphQL to AllAnime with variables:`, JSON.stringify(variables));
 
     try {
         const response = await axios.post(ALLANIME_API, {
             variables,
             query: searchGql
         }, {
-            headers: { 
-                'Referer': ALLANIME_REFR, 
+            headers: {
+                'Referer': ALLANIME_REFR,
                 'User-Agent': AGENT,
                 'Content-Type': 'application/json'
             }
         });
-        
+
         if (response.data.errors) {
-            console.error("[ERROR] GraphQL Errors:", JSON.stringify(response.data.errors));
             return res.status(400).json({ error: response.data.errors[0].message });
         }
-        
-        const edges = response.data.data?.shows?.edges || [];
-        console.log(`[DEBUG] Found ${edges.length} results`);
-        res.json(edges);
+
+        res.json(response.data.data?.shows?.edges || []);
     } catch (error) {
-        console.error(`[ERROR] Search error: ${error.message}`);
         res.status(500).json({ error: "External API error" });
     }
 });
@@ -94,14 +143,14 @@ app.get('/api/search', async (req, res) => {
 app.get('/api/episodes', async (req, res) => {
     const { showId } = req.query;
     const episodesGql = `query ($showId: String!) { show(_id: $showId) { _id name availableEpisodesDetail } }`;
-    
+
     try {
         const response = await axios.post(ALLANIME_API, {
             variables: { showId },
             query: episodesGql
         }, {
-            headers: { 
-                'Referer': ALLANIME_REFR, 
+            headers: {
+                'Referer': ALLANIME_REFR,
                 'User-Agent': AGENT,
                 'Content-Type': 'application/json'
             }
@@ -115,25 +164,25 @@ app.get('/api/episodes', async (req, res) => {
 app.get('/api/stream', async (req, res) => {
     const { showId, episode } = req.query;
     const streamGql = `query ($showId: String!, $translationType: VaildTranslationTypeEnumType!, $episodeString: String!) { episode(showId: $showId, translationType: $translationType, episodeString: $episodeString) { episodeString sourceUrls } }`;
-    
+
     try {
         const response = await axios.post(ALLANIME_API, {
             variables: { showId, translationType: "sub", episodeString: episode },
             query: streamGql
         }, {
-            headers: { 
-                'Referer': ALLANIME_REFR, 
+            headers: {
+                'Referer': ALLANIME_REFR,
                 'User-Agent': AGENT,
                 'Content-Type': 'application/json'
             }
         });
-        
-        const sourceUrls = response.data.data.episode.sourceUrls;
+
+        const sourceUrls = response.data.data?.episode?.sourceUrls || [];
         const resolvedSources = await Promise.all(sourceUrls.map(async (s) => {
             const decoded = decodeSourceUrl(s.sourceUrl);
             let finalLinks = [];
-            
-            if (decoded.includes('clock.json')) {
+
+            if (decoded && decoded.includes('clock.json')) {
                 try {
                     const clockUrl = decoded.startsWith('http') ? decoded : `https://${ALLANIME_BASE}${decoded}`;
                     const clockResp = await axios.get(clockUrl, {
@@ -150,10 +199,10 @@ app.get('/api/stream', async (req, res) => {
                     console.error(`Clock resolve error: ${e.message}`);
                 }
             }
-            
+
             return { ...s, decodedUrl: decoded, links: finalLinks };
         }));
-        
+
         res.json(resolvedSources);
     } catch (error) {
         res.status(500).json({ error: "External API error" });
@@ -162,10 +211,9 @@ app.get('/api/stream', async (req, res) => {
 
 app.get('/api/popular', async (req, res) => {
     const { format } = req.query;
-    console.log(`[DEBUG] Popular request: format="${format}"`);
     const anilistGql = `
     query ($type: MediaType, $format: [MediaFormat]) {
-      Page (page: 1, perPage: 20) {
+      Page (page: 1, perPage: 16) {
         media (type: $type, format_in: $format, sort: TRENDING_DESC) {
           title { romaji english }
           coverImage { large }
@@ -175,44 +223,47 @@ app.get('/api/popular', async (req, res) => {
     `;
 
     try {
-        console.log("[DEBUG] Fetching trending from AniList...");
         const response = await axios.post('https://graphql.anilist.co', {
             query: anilistGql,
             variables: { type: "ANIME", format: format ? [format] : ["TV", "MOVIE"] }
         });
-        
+
         const trending = response.data.data?.Page?.media || [];
-        console.log(`[DEBUG] Fetched ${trending.length} trending items from AniList`);
-        if (trending.length === 0) return res.json([]);
+        const results = [];
+        const seen = new Set();
 
-        const results = await Promise.all(trending.map(async (item) => {
-            const name = item.title.english || item.title.romaji;
-            const searchGql = `query($search: SearchInput) { shows(search: $search, limit: 1) { edges { _id name thumbnail availableEpisodes } } }`;
-            try {
-                const aResp = await axios.post(ALLANIME_API, {
-                    variables: {
-                        search: { query: name, allowAdult: false, allowUnknown: false },
-                        limit: 1,
-                        translationType: "sub"
-                    },
-                    query: searchGql
-                }, {
-                    headers: { 'Referer': ALLANIME_REFR, 'User-Agent': AGENT }
-                });
-                return aResp.data.data?.shows?.edges?.[0] || null;
-            } catch (e) { return null; }
-        }));
+        for (const item of trending) {
+            const english = item.title?.english;
+            const romaji = item.title?.romaji;
+            const queries = [...new Set([english, romaji].filter(Boolean))];
+            if (!queries.length) continue;
 
-        const filteredResults = results.filter(r => r !== null);
-        console.log(`[DEBUG] Mapped ${filteredResults.length} items to AllAnime`);
-        res.json(filteredResults);
+            let candidates = [];
+            for (const query of queries) {
+                try {
+                    candidates = candidates.concat(await searchShows(query));
+                } catch (e) {
+                    console.error(`[ERROR] Show search failed for ${query}: ${e.message}`);
+                }
+            }
+
+            const best = pickBestShow(candidates, queries);
+            if (!best || seen.has(best._id)) continue;
+            seen.add(best._id);
+            results.push({
+                ...best,
+                name: english || romaji || best.name,
+                thumbnail: item.coverImage?.large || best.thumbnail
+            });
+        }
+
+        res.json(results);
     } catch (error) {
         console.error(`[ERROR] Popular endpoint error: ${error.message}`);
         res.status(500).json({ error: "External API error" });
     }
 });
 
-// Health check
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
 app.listen(PORT, '0.0.0.0', (err) => {
